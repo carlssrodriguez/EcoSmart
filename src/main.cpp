@@ -1,21 +1,31 @@
 #include <Arduino.h>
 #include <Wire.h>
+#include <WiFi.h>
+#include <HttpClient.h>
 #include <TFT_eSPI.h>
 #include <math.h>
 
 // -------------------- PIN DEFINITIONS --------------------
-#define LIGHT_SENSOR_PIN 33   // LDR connected to GPIO 33
-#define LED_PIN 25            // LED connected to GPIO 25
-#define LSM6DSO_ADDR 0x6B     // I2C address of accelerometer
+#define LIGHT_SENSOR_PIN 33
+#define LED_PIN 25
+#define LSM6DSO_ADDR 0x6B
+
+// -------------------- WIFI CREDENTIALS --------------------
+const char* ssid = "vitto";
+const char* password = "12345678";
+
+// -------------------- SERVER SETTINGS --------------------
+const char* serverAddress = "18.144.69.140"; 
+const int serverPort = 5000;
 
 // -------------------- THRESHOLDS --------------------
-const int lightThreshold = 2500;     // Light intensity threshold
-const float motionThreshold = 0.05;   // Motion detection threshold (deviation from 1g)
+const int lightThreshold = 2500;
+const float motionThreshold = 0.05;
 
 // -------------------- DISPLAY --------------------
 TFT_eSPI tft = TFT_eSPI();
 
-// -------------------- ACCELEROMETER READING --------------------
+// -------------------- READ ACCELEROMETER AXIS --------------------
 int16_t readAxis(uint8_t reg) {
   Wire.beginTransmission(LSM6DSO_ADDR);
   Wire.write(reg);
@@ -30,28 +40,48 @@ int16_t readAxis(uint8_t reg) {
 // -------------------- SETUP --------------------
 void setup() {
   Serial.begin(115200);
-  Wire.begin(21, 22); // SDA=21, SCL=22 for TTGO
+  
+  // Initialize I2C
+  Wire.begin(21, 22);
 
-  // Initialize accelerometer (416Hz, ±2g)
+  // Initialize Accelerometer
   Wire.beginTransmission(LSM6DSO_ADDR);
-  Wire.write(0x10); 
+  Wire.write(0x10);
   Wire.write(0x60); 
   Wire.endTransmission();
 
+  // Initialize Pins
   pinMode(LIGHT_SENSOR_PIN, INPUT);
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
 
-  // Initialize TFT display
+  // Initialize Display
   tft.init();
   tft.setRotation(1);
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
-
   tft.setCursor(20, 50);
-  tft.print("System Ready...");
-  delay(1000);
+  tft.println("System Ready!");
+
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  tft.fillScreen(TFT_BLACK);
+  tft.setCursor(20, 50);
+  tft.println("Connecting WiFi...");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  
+  Serial.println("\nWiFi Connected");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+
+  tft.fillScreen(TFT_BLACK);
+  tft.setCursor(20, 50);
+  tft.println("WiFi Connected!");
 }
 
 // -------------------- LOOP --------------------
@@ -73,28 +103,44 @@ void loop() {
   bool isDark = lightLevel < lightThreshold;
   bool deviceOn = motionDetected || isDark;
 
-  // Print sensor data to Serial Monitor
-  Serial.printf("Light Level: %d | Motion: %s\n", lightLevel, motionDetected ? "YES" : "NO");
-  Serial.printf("Accel [g]: X=%.3f | Y=%.3f | Z=%.3f | Mag=%.3f | Dev=%.3f\n", ax, ay, az, magnitude, deviation);
-
-  // Control LED based on light and motion detection
+  // Update LED
   digitalWrite(LED_PIN, deviceOn ? HIGH : LOW);
-  Serial.println(deviceOn ? "Devices ON - Active or Dark Room" : "Devices OFF - Energy Saved");
 
-  // Update TFT display
+  // Update Display
   tft.fillScreen(TFT_BLACK);
-
-  tft.setCursor(10, 20);
+  tft.setCursor(0, 10);
   tft.printf("Light: %d", lightLevel);
-
-  tft.setCursor(10, 50);
+  tft.setCursor(0, 30);
   tft.printf("Motion: %s", motionDetected ? "YES" : "NO");
-
-  tft.setCursor(10, 80);
+  tft.setCursor(0, 50);
   tft.printf("Z: %.2f g", az);
+  tft.setCursor(0, 70);
+  tft.printf("%s", deviceOn ? "Devices ON" : "Devices OFF");
 
-  tft.setCursor(10, 110);
-  tft.print(deviceOn ? "Devices ON" : "Devices OFF");
+  // Send data to server
+  WiFiClient client;
+  HttpClient http(client);
 
-  delay(2000);
+  String path = "/?var=Light:" + String(lightLevel);
+  path += "-Motion:" + String(motionDetected ? "YES" : "NO");
+
+  Serial.println("Sending data to server...");
+  int err = http.get(serverAddress, serverPort, path.c_str());
+
+  if (err == 0) {
+    Serial.println("Request sent.");
+    int statusCode = http.responseStatusCode();
+    Serial.printf("Status code: %d\n", statusCode);
+
+    http.skipResponseHeaders();
+    while (http.available()) {
+      char c = http.read();
+      Serial.print(c);
+    }
+  } else {
+    Serial.printf("Connection error: %d\n", err);
+  }
+
+  http.stop();
+  delay(10000);
 }
