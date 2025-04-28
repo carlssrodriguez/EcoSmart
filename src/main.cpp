@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <HttpClient.h>
 #include <TFT_eSPI.h>
+#include <NimBLEDevice.h>
 #include <math.h>
 
 // -------------------- PIN DEFINITIONS --------------------
@@ -11,8 +12,8 @@
 #define LSM6DSO_ADDR 0x6B
 
 // -------------------- WIFI CREDENTIALS --------------------
-const char* ssid = "vitto";
-const char* password = "12345678";
+const char* ssid = "mondi";
+const char* password = "123456789";
 
 // -------------------- SERVER SETTINGS --------------------
 const char* serverAddress = "18.144.69.140"; 
@@ -20,10 +21,15 @@ const int serverPort = 5000;
 
 // -------------------- THRESHOLDS --------------------
 const int lightThreshold = 2500;
-const float motionThreshold = 0.05;
+const float motionThreshold = 0.04;
 
 // -------------------- DISPLAY --------------------
 TFT_eSPI tft = TFT_eSPI();
+
+// -------------------- BLUETOOTH --------------------
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+NimBLECharacteristic* pCharacteristic = nullptr;
 
 // -------------------- READ ACCELEROMETER AXIS --------------------
 int16_t readAxis(uint8_t reg) {
@@ -40,7 +46,7 @@ int16_t readAxis(uint8_t reg) {
 // -------------------- SETUP --------------------
 void setup() {
   Serial.begin(115200);
-  
+
   // Initialize I2C
   Wire.begin(21, 22);
 
@@ -64,6 +70,22 @@ void setup() {
   tft.setCursor(20, 50);
   tft.println("System Ready!");
 
+  // Initialize Bluetooth BLE
+  NimBLEDevice::init("EcoSmart");
+  NimBLEServer* pServer = NimBLEDevice::createServer();
+  NimBLEService* pService = pServer->createService(SERVICE_UUID);
+  pCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID,
+    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
+  );
+  pCharacteristic->setValue("System Ready");
+  pService->start();
+  NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->start();
+
+  Serial.println("Bluetooth started as EcoSmart");
+
   // Connect to WiFi
   WiFi.begin(ssid, password);
   tft.fillScreen(TFT_BLACK);
@@ -74,7 +96,7 @@ void setup() {
     delay(500);
     Serial.print(".");
   }
-  
+
   Serial.println("\nWiFi Connected");
   Serial.print("IP Address: ");
   Serial.println(WiFi.localIP());
@@ -142,5 +164,11 @@ void loop() {
   }
 
   http.stop();
+
+  // Send data via Bluetooth (UTF-8 formatted)
+  std::string btData = "Light: " + std::to_string(lightLevel) + " Motion: " + (motionDetected ? "YES" : "NO");
+  pCharacteristic->setValue(btData);
+  pCharacteristic->notify();
+
   delay(10000);
 }
