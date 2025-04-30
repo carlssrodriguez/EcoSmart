@@ -12,8 +12,8 @@
 #define LSM6DSO_ADDR 0x6B
 
 // -------------------- WIFI CREDENTIALS --------------------
-const char* ssid = "mondi";
-const char* password = "123456789";
+const char* ssid = "langas";
+const char* password = "cabritas";
 
 // -------------------- SERVER SETTINGS --------------------
 const char* serverAddress = "18.144.69.140"; 
@@ -170,5 +170,5 @@ void loop() {
   pCharacteristic->setValue(btData);
   pCharacteristic->notify();
 
-  delay(10000);
+  delay(1000);
 }
